@@ -68,11 +68,12 @@ function main(){
       }
     });
 
-    // このバッチ分をシートに反映（進捗を随時表示）
+    // このバッチ分をシートに反映し、即時フラッシュで進捗を随時表示
     var statusRange = sheet.getRange(ROW_START, COL_STATUS, numRows, 1);
     statusRange.setValues(statusValues);
     statusRange.setBackgrounds(backgrounds);
     statusRange.setFontColors(fontColors);
+    SpreadsheetApp.flush();
   }
 }
 
