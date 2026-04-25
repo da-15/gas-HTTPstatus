@@ -1,6 +1,7 @@
 var ROW_START = 2; //データの開始行を指定。
 var COL_URL = 2; // HTTPステータスチェックを行いたいURL列
 var COL_STATUS = 1; // ステータス結果を出力したい列
+var BATCH_SIZE = 20; // 1回のfetchAllで処理するURL件数
 
 /*
  * メニューを追加
@@ -29,47 +30,50 @@ function main(){
   // URLを一括取得（スプレッドシートAPIコールを1回に削減）
   var urls = sheet.getRange(ROW_START, COL_URL, numRows).getValues().map(function(row){ return row[0]; });
 
-  // 有効なURLのみリクエスト配列を構築（インデックスを保持）
-  var validIndices = [];
-  var requests = [];
+  // 有効なURLをインデックス付きで収集
+  var validItems = [];
   urls.forEach(function(url, i){
     if(url){
-      validIndices.push(i);
-      requests.push({ url: url, muteHttpExceptions: true });
+      validItems.push({ index: i, url: url });
     }
   });
-
-  // URLを並列フェッチ
-  var responses = requests.length > 0 ? UrlFetchApp.fetchAll(requests) : [];
 
   // 結果配列を初期化
   var statusValues = urls.map(function(){ return ['']; });
-  var backgrounds = urls.map(function(){ return [null]; });
-  var fontColors  = urls.map(function(){ return [null]; });
+  var backgrounds  = urls.map(function(){ return [null]; });
+  var fontColors   = urls.map(function(){ return [null]; });
 
-  // レスポンスを処理
-  validIndices.forEach(function(rowIdx, i){
-    var resCode;
-    try{
-      resCode = responses[i].getResponseCode();
-    }catch(ex){
-      resCode = 999;
-    }
+  // 20件ずつバッチに分割してfetchAll、バッチごとにシートへ反映
+  for(var b = 0; b < validItems.length; b += BATCH_SIZE){
+    var batch = validItems.slice(b, b + BATCH_SIZE);
+    var requests = batch.map(function(item){
+      return { url: item.url, muteHttpExceptions: true };
+    });
+    var responses = UrlFetchApp.fetchAll(requests);
 
-    statusValues[rowIdx] = [resCode === 999 ? 'Err' : resCode];
+    batch.forEach(function(item, i){
+      var resCode;
+      try{
+        resCode = responses[i].getResponseCode();
+      }catch(ex){
+        resCode = 999;
+      }
 
-    // ステータス200以外は背景赤・文字白
-    if(resCode !== 200){
-      backgrounds[rowIdx] = ['#FF0000'];
-      fontColors[rowIdx]  = ['#FFFFFF'];
-    }
-  });
+      statusValues[item.index] = [resCode === 999 ? 'Err' : resCode];
 
-  // 結果を一括書き込み（スプレッドシートAPIコールを3回に削減）
-  var statusRange = sheet.getRange(ROW_START, COL_STATUS, numRows, 1);
-  statusRange.setValues(statusValues);
-  statusRange.setBackgrounds(backgrounds);
-  statusRange.setFontColors(fontColors);
+      // ステータス200以外は背景赤・文字白
+      if(resCode !== 200){
+        backgrounds[item.index] = ['#FF0000'];
+        fontColors[item.index]  = ['#FFFFFF'];
+      }
+    });
+
+    // このバッチ分をシートに反映（進捗を随時表示）
+    var statusRange = sheet.getRange(ROW_START, COL_STATUS, numRows, 1);
+    statusRange.setValues(statusValues);
+    statusRange.setBackgrounds(backgrounds);
+    statusRange.setFontColors(fontColors);
+  }
 }
 
 
