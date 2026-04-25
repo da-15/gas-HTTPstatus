@@ -6,64 +6,70 @@ var COL_STATUS = 1; // ステータス結果を出力したい列
  * メニューを追加
  */
 function onOpen(){
-  //メニュー配列
   var myMenu=[
     {name: "実行", functionName: "main"},
     {name: "ステータスクリア", functionName: "fncClear"}
   ];
-  //メニューを追加
   SpreadsheetApp.getActiveSpreadsheet().addMenu("ステータスチェック",myMenu);
-
 }
 
 /*
  * メイン実行
  */
 function main(){
-  var i; 
-  var strURL;
-  var resCode
   var sheet = SpreadsheetApp.getActiveSheet();
+  var lastRow = sheet.getLastRow();
 
-  
-  //ステータスカラムをクリア
   fncClear();
-  
-  for(i=ROW_START; i<=sheet.getLastRow(); i++){
-    // HTTPステータスを取得
-    strURL = sheet.getRange(i, COL_URL).getValue();
-    resCode = getHTTPStatusCode(strURL);
-    
-    
-    if(resCode === 999){
-       //エラーを書き込む
-       sheet.getRange(i, COL_STATUS).setValue("Err");
-    }else{
-       //結果を書き込み
-       sheet.getRange(i, COL_STATUS).setValue(resCode);
-    }
-    
-    // エラー時の色変更（ステータス２００以外は背景赤）
-    if(resCode !== 200){
-      sheet.getRange(i, COL_STATUS).setBackground('#FF0000');
-      sheet.getRange(i, COL_STATUS).setFontColor('#FFFFFF'); 
-    }
-  }
-}
 
-/*
- * HTTPステータスチェック
- */
-function getHTTPStatusCode(strURL){
-  var options = {
-    "muteHttpExceptions": true,　    // 404エラーでも処理を継続する
-  };
-  try{
-    return resCode = UrlFetchApp.fetch(strURL, options).getResponseCode();
-  }
-  catch(ex){
-    return 999; // エラー時は９９９を返す
-  }
+  if(lastRow < ROW_START) return;
+
+  var numRows = lastRow - ROW_START + 1;
+
+  // URLを一括取得（スプレッドシートAPIコールを1回に削減）
+  var urls = sheet.getRange(ROW_START, COL_URL, numRows).getValues().map(function(row){ return row[0]; });
+
+  // 有効なURLのみリクエスト配列を構築（インデックスを保持）
+  var validIndices = [];
+  var requests = [];
+  urls.forEach(function(url, i){
+    if(url){
+      validIndices.push(i);
+      requests.push({ url: url, muteHttpExceptions: true });
+    }
+  });
+
+  // URLを並列フェッチ
+  var responses = requests.length > 0 ? UrlFetchApp.fetchAll(requests) : [];
+
+  // 結果配列を初期化
+  var statusValues = urls.map(function(){ return ['']; });
+  var backgrounds = urls.map(function(){ return [null]; });
+  var fontColors  = urls.map(function(){ return [null]; });
+
+  // レスポンスを処理
+  validIndices.forEach(function(rowIdx, i){
+    var resCode;
+    try{
+      resCode = responses[i].getResponseCode();
+    }catch(ex){
+      resCode = 999;
+    }
+
+    statusValues[rowIdx] = [resCode === 999 ? 'Err' : resCode];
+
+    // ステータス200以外は背景赤・文字白
+    if(resCode !== 200){
+      backgrounds[rowIdx] = ['#FF0000'];
+      fontColors[rowIdx]  = ['#FFFFFF'];
+    }
+  });
+
+  // 結果を一括書き込み（スプレッドシートAPIコールを3回に削減）
+  var statusRange = sheet.getRange(ROW_START, COL_STATUS, numRows, 1);
+  statusRange.setValues(statusValues);
+  statusRange.setBackgrounds(backgrounds);
+  statusRange.setFontColors(fontColors);
 }
 
 
@@ -73,5 +79,4 @@ function getHTTPStatusCode(strURL){
 function fncClear(){
   var sheet = SpreadsheetApp.getActiveSheet();
   sheet.getRange(ROW_START, COL_STATUS, sheet.getLastRow()).clear();
-
 }
